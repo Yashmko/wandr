@@ -52,6 +52,17 @@ jobs:
           enable-cache: true
       - run: uv --no-config run --locked python adapters/wandr/src/wandr/utils/consistency.py
 
+  relay-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv --no-config run --locked python scripts/validate_provider_contracts.py
+      - run: uv --no-config run --locked python scripts/relay_mock_smoke.py
+
   dockerfile:
     runs-on: ubuntu-latest
     steps:

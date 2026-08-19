@@ -2,10 +2,14 @@
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
+import platform
+import sys
 import traceback
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +70,24 @@ LOGGER = logging.getLogger("wandr_harbor.verify")
 DEFAULT_LOGS_DIR = Path("/logs/verifier")
 DEFAULT_HEAL_RETRIES = 9
 DEFAULT_HEAL_MIN_COVERAGE = 0.90
+REPLAY_ENV_KEYS = (
+    "WANDR_HEAL_RETRIES",
+    "WANDR_HEAL_MIN_COVERAGE",
+    "WANDR_SUBMISSION_CONCURRENCY",
+    "WANDR_DNS_CONCURRENCY",
+    "WANDR_FETCH_CONCURRENCY",
+    "WANDR_FETCH_BATCH_SIZE",
+    "WANDR_FETCH_CLIENT_LOAD",
+    "WANDR_TRIAGE_CONCURRENCY",
+    "WANDR_TRIAGE_CLIENT_LOAD",
+    "WANDR_BROWSER_CONCURRENCY",
+    "WANDR_CANON_CONCURRENCY",
+    "WANDR_CANON_CLIENT_LOAD",
+    "WANDR_DEDUP_CONCURRENCY",
+    "WANDR_DEDUP_CLIENT_LOAD",
+    "WANDR_JUDGE_CONCURRENCY",
+    "WANDR_JUDGE_CLIENT_LOAD",
+)
 
 
 class InvalidSubmissionError(ValueError):
@@ -152,6 +174,54 @@ def _build_metrics_report(
     }
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _task_dir_digest(task_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(path for path in task_dir.rglob("*") if path.is_file()):
+        rel = path.relative_to(task_dir).as_posix()
+        digest.update(f"{rel}\0{_sha256(path)}\n".encode())
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _build_replay_pack(
+    *,
+    manifest: Manifest,
+    submissions: SubmissionInputs,
+    task_dir: Path,
+    output_dir: Path,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "runtime": {
+            "python": sys.version,
+            "platform": platform.platform(),
+        },
+        "task": {
+            "manifest": manifest["document"],
+            "task_dir": str(task_dir),
+            "task_dir_digest": _task_dir_digest(task_dir),
+        },
+        "submissions": {
+            task_name: {
+                "path": str(path),
+                "rows": submissions["rows_by_task"].get(task_name, 0),
+                "sha256": _sha256(path),
+            }
+            for task_name, path in submissions["paths_by_task"].items()
+        },
+        "output_dir": str(output_dir),
+        "env": {key: env.get(key) for key in REPLAY_ENV_KEYS if env.get(key) is not None},
+    }
+
+
 def _write_run_artifacts(
     *,
     artifacts: ArtifactPaths,
@@ -162,6 +232,7 @@ def _write_run_artifacts(
     stdio_log_path: Path,
     judged_records: list[Record],
     metrics_report: dict[str, Any],
+    replay_pack: dict[str, Any],
 ) -> None:
     report = report_from_metrics(metrics_report)
     rewards = scoremap_rewards(report["scoremap"])
@@ -201,6 +272,7 @@ def _write_run_artifacts(
         ),
     )
     write_json(artifacts["wandr_details_json"], diagnostics)
+    write_json(artifacts["replay_pack_json"], replay_pack)
     artifacts["error_json"].unlink(missing_ok=True)
     public_print(render_scoremap(report["scoremap"]), end="")
 
@@ -253,6 +325,13 @@ async def _run_evaluation(
                 stdio_log_path=stdio_log_path,
                 judged_records=judged_records,
                 metrics_report=metrics_report,
+                replay_pack=_build_replay_pack(
+                    manifest=manifest,
+                    submissions=submissions,
+                    task_dir=task_dir,
+                    output_dir=output_dir,
+                    env=env,
+                ),
             )
         except Exception as exc:
             last_error = exc

@@ -10,6 +10,8 @@ Usage: scripts/wandr <command> [arguments]
 
 Commands:
   check                  Run configuration, lint, and consistency checks.
+  scaffold-task <name> [args...]
+                         Scaffold a new reference/wandr_tasks source task.
   preflight [local|e2b] [smoke|all]
                          Check tools, keys, and the selected runtime.
   smoke-local [args...]  Run the low-cost local Docker smoke config.
@@ -47,6 +49,15 @@ require_config() {
 
 uv_run() {
   uv --no-config run --project "$ROOT" --locked "$@"
+}
+
+cost_guardrail() {
+  local config="$1"
+  uv_run python "$ROOT/scripts/run_cost_guardrails.py" \
+    --config "$config" \
+    --max-trial-units "${WANDR_MAX_TRIAL_UNITS:-0}" \
+    --max-concurrent-trials "${WANDR_MAX_CONCURRENT_TRIALS:-0}" \
+    ${WANDR_ALLOW_EXPENSIVE_CONFIG:+--allow-expensive}
 }
 
 missing_provider_keys() {
@@ -143,24 +154,37 @@ fi
 case "$command" in
   check)
     uv_run python scripts/validate_configs.py
+    uv_run python scripts/validate_provider_contracts.py
+    uv_run python scripts/relay_mock_smoke.py
     uv_run ruff check agents/relay agents/sitecustomize.py adapters/wandr/src/wandr scripts
     uv_run ruff format --check scripts
     uv_run python adapters/wandr/src/wandr/utils/consistency.py
+    ;;
+  scaffold-task)
+    if [[ "$#" -eq 0 ]]; then
+      printf 'error: scaffold-task requires a task name.\n' >&2
+      usage >&2
+      exit 2
+    fi
+    uv_run python scripts/scaffold_wandr_task.py "$@"
     ;;
   preflight)
     preflight "${1:-local}" "${2:-smoke}"
     ;;
   smoke-local)
     preflight local
+    cost_guardrail "configs/smoke.yaml"
     uv_run harbor run -y -c configs/smoke.yaml "$@"
     ;;
   smoke-e2b)
     preflight e2b
+    cost_guardrail "configs/smoke.yaml"
     uv_run harbor run -y -c configs/smoke.yaml -e e2b "$@"
     ;;
   validate)
     require_config "configs/validation.yaml"
     preflight local all
+    cost_guardrail "configs/validation.yaml"
     uv_run harbor run -y -c configs/validation.yaml "$@"
     ;;
   run)
@@ -168,6 +192,17 @@ case "$command" in
       printf 'error: run requires arguments for `harbor run`.\n' >&2
       usage >&2
       exit 2
+    fi
+    config=""
+    for ((i=1; i<=$#; i++)); do
+      if [[ "${!i}" == "-c" || "${!i}" == "--config" ]]; then
+        next=$((i + 1))
+        config="${!next:-}"
+        break
+      fi
+    done
+    if [[ -n "$config" ]]; then
+      cost_guardrail "$config"
     fi
     uv_run harbor run "$@"
     ;;

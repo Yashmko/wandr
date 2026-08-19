@@ -70,6 +70,15 @@ ENDPOINT_KWARGS = {
     "gemini": {"base_url", "delivery_channel", "poll_interval_sec"},
 }
 
+ENDPOINT_DELIVERY_CHANNELS = {
+    "openai": {"sandbox", "stdout", "output"},
+    "anthropic": {"sandbox", "output"},
+    "perplexity": {"share", "output"},
+    "exa": {"output"},
+    "parallel": {"output"},
+    "gemini": {"output"},
+}
+
 
 def _is_bool(value: Any) -> bool:
     return isinstance(value, bool)
@@ -169,6 +178,16 @@ def _validate_relay_agent(path: Path, index: int, agent: dict[str, Any]) -> None
         raise ValueError(
             f"{path}: agent {index} has unknown {provider} endpoint kwargs: "
             + ", ".join(unknown_endpoint_kwargs)
+        )
+    delivery_channel = endpoint.get("delivery_channel")
+    allowed_delivery_channels = ENDPOINT_DELIVERY_CHANNELS.get(provider, set())
+    if (
+        delivery_channel is not None
+        and delivery_channel not in allowed_delivery_channels
+    ):
+        raise ValueError(
+            f"{path}: agent {index} invalid {provider} delivery_channel={delivery_channel!r}; "
+            f"allowed={sorted(allowed_delivery_channels)}"
         )
 
     # Constructors parse provider-owned request options and delivery settings,

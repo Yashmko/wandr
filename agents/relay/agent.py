@@ -117,6 +117,12 @@ class _HarborRelayObserver:
         self._status: dict[str, Any] = {
             "endpoint": endpoint_name,
             "events_seen": 0,
+            "restart_summary": {
+                "count": 0,
+                "last_reason": None,
+                "failure_taxonomy": None,
+                "max_restarts": None,
+            },
         }
         self._prompt: str | None = None
         self.events: list[dict[str, Any]] = []
@@ -149,6 +155,13 @@ class _HarborRelayObserver:
         for key in ("response_id", "session_id", "status", "model"):
             if metadata.get(key) is not None:
                 self._status[key] = metadata[key]
+        if event.name == "endpoint.poll" and metadata.get("restart") is not None:
+            restart_summary = dict(self._status.get("restart_summary") or {})
+            restart_summary["count"] = int(restart_summary.get("count") or 0) + 1
+            restart_summary["last_reason"] = metadata.get("restart_reason")
+            restart_summary["failure_taxonomy"] = metadata.get("failure_taxonomy")
+            restart_summary["max_restarts"] = metadata.get("max_restarts")
+            self._status["restart_summary"] = restart_summary
         _write_text_atomic(
             self._status_path,
             json.dumps(self._status, indent=2, sort_keys=True),
@@ -1105,6 +1118,7 @@ def _result_summary(relay_result: RelayResult) -> dict[str, Any]:
         "response_id": endpoint_result.response_id,
         "usage": endpoint_result.usage,
         "cost_usd": endpoint_result.cost_usd,
+        "relay": endpoint_result.raw,
         "artifacts": [
             {
                 "name": artifact.name,

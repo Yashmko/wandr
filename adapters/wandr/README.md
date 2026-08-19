@@ -3,6 +3,12 @@
 This package generates self-contained Harbor tasks under
 `datasets/wandr/<task-slug>`.
 
+Scaffold a new source task before generation:
+
+```bash
+./scripts/wandr scaffold-task your_task_name --domain-tag general
+```
+
 ## Ownership
 
 The adapter keeps replicated state explicit:
@@ -68,6 +74,8 @@ contract without understanding the WANDR manifest. The verifier always reads
 those files from the workspace and never seeds or replaces them. `task.toml`
 also provides public network access to the agent and verifier and forwards only
 the documented WANDR and provider environment variables.
+Task templates also forward `WANDR_DETERMINISTIC_PROFILE` for deterministic
+validation-mode evaluator defaults.
 
 ## Consistency
 

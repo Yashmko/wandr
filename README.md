@@ -116,6 +116,18 @@ Run the standard two-task validation:
 ./scripts/wandr validate
 ```
 
+Validation and full runs are marked as expensive. Acknowledge explicitly:
+
+```bash
+WANDR_ACK_EXPENSIVE_CONFIG=1 ./scripts/wandr validate
+```
+
+Optional cost guardrails can hard-stop oversized launches:
+
+```bash
+WANDR_MAX_TRIAL_UNITS=5000 WANDR_MAX_CONCURRENT_TRIALS=12 ./scripts/wandr run -y -c configs/wandr.yaml
+```
+
 Run the full benchmark only after smoke and validation have passed:
 
 ```bash
@@ -196,6 +208,12 @@ uv --no-config run --project adapters/wandr --locked wandr \
   pharma_former_rd_heads --overwrite
 ```
 
+Create a new task source scaffold:
+
+```bash
+./scripts/wandr scaffold-task new_task_name --domain-tag finance --difficulty medium
+```
+
 Regenerate every task:
 
 ```bash
@@ -215,6 +233,14 @@ Adapter details live in [`adapters/wandr/README.md`](adapters/wandr/README.md).
 Relay details live in [`agents/relay/README.md`](agents/relay/README.md).
 Task-source details live in
 [`reference/wandr_tasks/README.md`](reference/wandr_tasks/README.md).
+
+Additional implementation docs:
+
+- [`docs/product-goals.md`](docs/product-goals.md)
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/provider-capability-matrix.md`](docs/provider-capability-matrix.md)
+- [`docs/quickstarts.md`](docs/quickstarts.md)
+- [`docs/troubleshooting.md`](docs/troubleshooting.md)
 
 ## Data And Third-Party Sources
 

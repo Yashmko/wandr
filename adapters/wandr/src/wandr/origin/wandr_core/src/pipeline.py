@@ -101,24 +101,43 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-SUBMISSION_CONCURRENCY = _env_int("WANDR_SUBMISSION_CONCURRENCY", 25)
-FETCH_CONCURRENCY = _env_int("WANDR_FETCH_CONCURRENCY", 50)
-DNS_CONCURRENCY = _env_int("WANDR_DNS_CONCURRENCY", FETCH_CONCURRENCY)
-FETCH_BATCH_SIZE = _env_int("WANDR_FETCH_BATCH_SIZE", 25)
-FETCH_CLIENT_LOAD = _env_int("WANDR_FETCH_CLIENT_LOAD", 25)
-TRIAGE_CONCURRENCY = _env_int("WANDR_TRIAGE_CONCURRENCY", 50)
-TRIAGE_CLIENT_LOAD = _env_int("WANDR_TRIAGE_CLIENT_LOAD", 25)
-BROWSER_CONCURRENCY = _env_int("WANDR_BROWSER_CONCURRENCY", 4)
+DETERMINISTIC_PROFILE = (
+    os.environ.get("WANDR_DETERMINISTIC_PROFILE", "").strip().lower()
+)
+IS_DETERMINISTIC = DETERMINISTIC_PROFILE in {"validation", "strict", "1", "true", "yes"}
+
+
+def _profile_default(normal: int, deterministic: int = 1) -> int:
+    return deterministic if IS_DETERMINISTIC else normal
+
+
+SUBMISSION_CONCURRENCY = _env_int(
+    "WANDR_SUBMISSION_CONCURRENCY",
+    _profile_default(25),
+)
+FETCH_CONCURRENCY = _env_int("WANDR_FETCH_CONCURRENCY", _profile_default(50))
+DNS_CONCURRENCY = _env_int(
+    "WANDR_DNS_CONCURRENCY",
+    _profile_default(FETCH_CONCURRENCY),
+)
+FETCH_BATCH_SIZE = _env_int("WANDR_FETCH_BATCH_SIZE", _profile_default(25))
+FETCH_CLIENT_LOAD = _env_int("WANDR_FETCH_CLIENT_LOAD", _profile_default(25))
+TRIAGE_CONCURRENCY = _env_int("WANDR_TRIAGE_CONCURRENCY", _profile_default(50))
+TRIAGE_CLIENT_LOAD = _env_int("WANDR_TRIAGE_CLIENT_LOAD", _profile_default(25))
+BROWSER_CONCURRENCY = _env_int("WANDR_BROWSER_CONCURRENCY", _profile_default(4))
 BROWSER_FALLBACK = _env_bool("WANDR_BROWSER_FALLBACK", False)
-CANON_CONCURRENCY = _env_int("WANDR_CANON_CONCURRENCY", 20)
-CANON_CLIENT_LOAD = _env_int("WANDR_CANON_CLIENT_LOAD", 25)
-DEDUP_CONCURRENCY = _env_int("WANDR_DEDUP_CONCURRENCY", 10)
-DEDUP_CLIENT_LOAD = _env_int("WANDR_DEDUP_CLIENT_LOAD", 25)
-DEDUP_BUFFER_TTL = _env_int("WANDR_DEDUP_BUFFER_TTL", 180)
-JUDGE_CONCURRENCY = _env_int("WANDR_JUDGE_CONCURRENCY", 50)
-JUDGE_CLIENT_LOAD = _env_int("WANDR_JUDGE_CLIENT_LOAD", 25)
-CONVERGENCE_TTL = _env_int("WANDR_CONVERGENCE_TTL", 300)
-CONVERGENCE_TTL_RETRIES = _env_int("WANDR_CONVERGENCE_TTL_RETRIES", 10_000)
+CANON_CONCURRENCY = _env_int("WANDR_CANON_CONCURRENCY", _profile_default(20))
+CANON_CLIENT_LOAD = _env_int("WANDR_CANON_CLIENT_LOAD", _profile_default(25))
+DEDUP_CONCURRENCY = _env_int("WANDR_DEDUP_CONCURRENCY", _profile_default(10))
+DEDUP_CLIENT_LOAD = _env_int("WANDR_DEDUP_CLIENT_LOAD", _profile_default(25))
+DEDUP_BUFFER_TTL = _env_int("WANDR_DEDUP_BUFFER_TTL", _profile_default(180, 300))
+JUDGE_CONCURRENCY = _env_int("WANDR_JUDGE_CONCURRENCY", _profile_default(50))
+JUDGE_CLIENT_LOAD = _env_int("WANDR_JUDGE_CLIENT_LOAD", _profile_default(25))
+CONVERGENCE_TTL = _env_int("WANDR_CONVERGENCE_TTL", _profile_default(300, 600))
+CONVERGENCE_TTL_RETRIES = _env_int(
+    "WANDR_CONVERGENCE_TTL_RETRIES",
+    _profile_default(10_000, 20_000),
+)
 
 
 async def run_pipeline(

