@@ -10,6 +10,7 @@ Typical task sources include:
 - `prompts/`: solver-facing and evaluator prompt fragments;
 - `schemas/`: structured output and judgment models;
 - `artifacts/`: task-owned source material required by the task or evaluator.
+- `task_meta.toml`: quality-gate metadata (difficulty, domain tags, runtime/cost class).
 
 These directories are source data, not independently runnable Harbor packages.
 The adapter renders them into self-contained packages under `datasets/wandr/`.
@@ -22,6 +23,12 @@ package from the repository root:
 ```bash
 uv --no-config run --project adapters/wandr --locked wandr \
   <task_name> --overwrite
+```
+
+Create a new source directory with scaffold defaults:
+
+```bash
+./scripts/wandr scaffold-task <task_name> --domain-tag <tag>
 ```
 
 Regenerate the full dataset with:

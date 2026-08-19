@@ -6,6 +6,7 @@ import filecmp
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import sys
 import tomllib
@@ -44,6 +45,9 @@ HARBOR_TEMPLATE_TEST_FILES = (
 )
 WANDR_CORE_DEPS_FILES = ("pyproject.toml", "uv.lock")
 TASK_NAME_RE = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")
+TASK_DIFFICULTY = frozenset({"easy", "medium", "hard", "expert"})
+TASK_RUNTIME_CLASS = frozenset({"short", "standard", "long"})
+TASK_COST_CLASS = frozenset({"low", "medium", "high"})
 
 if str(WANDR_CORE_DIR) not in sys.path:
     sys.path.insert(0, str(WANDR_CORE_DIR))
@@ -179,6 +183,98 @@ def canonical_source_layout_errors(
         "reference tasks contain unsupported files outside task artifact trees: "
         f"{unsupported}"
     ]
+
+
+def _task_source_dirs(reference_tasks_dir: Path = REFERENCE_TASKS_DIR) -> list[Path]:
+    return sorted(
+        path
+        for path in reference_tasks_dir.iterdir()
+        if path.is_dir() and (path / "config.py").is_file()
+    )
+
+
+def _task_metadata_errors(task_dir: Path) -> list[str]:
+    metadata_path = task_dir / "task_meta.toml"
+    enforce_metadata = os.environ.get("WANDR_ENFORCE_TASK_METADATA", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not metadata_path.exists():
+        return (
+            [f"{task_dir.name}/task_meta.toml: missing (required by WANDR_ENFORCE_TASK_METADATA)"]
+            if enforce_metadata
+            else []
+        )
+
+    metadata = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    difficulty = metadata.get("difficulty")
+    runtime_class = metadata.get("expected_runtime_class")
+    cost_class = metadata.get("expected_cost_class")
+    quality = metadata.get("quality")
+    domain_tags = quality.get("domain_tags") if isinstance(quality, dict) else None
+    if difficulty not in TASK_DIFFICULTY:
+        errors.append(
+            f"{task_dir.name}/task_meta.toml: difficulty must be one of {sorted(TASK_DIFFICULTY)}"
+        )
+    if runtime_class not in TASK_RUNTIME_CLASS:
+        errors.append(
+            f"{task_dir.name}/task_meta.toml: expected_runtime_class must be one of "
+            f"{sorted(TASK_RUNTIME_CLASS)}"
+        )
+    if cost_class not in TASK_COST_CLASS:
+        errors.append(
+            f"{task_dir.name}/task_meta.toml: expected_cost_class must be one of "
+            f"{sorted(TASK_COST_CLASS)}"
+        )
+    if (
+        not isinstance(domain_tags, list)
+        or not domain_tags
+        or any(not isinstance(tag, str) or not tag.strip() for tag in domain_tags)
+    ):
+        errors.append(
+            f"{task_dir.name}/task_meta.toml: quality.domain_tags must be a non-empty string array"
+        )
+    return errors
+
+
+def task_source_quality_errors(reference_tasks_dir: Path = REFERENCE_TASKS_DIR) -> list[str]:
+    errors: list[str] = []
+    for task_dir in _task_source_dirs(reference_tasks_dir):
+        prompts_dir = task_dir / "prompts"
+        task_template = prompts_dir / "task_template.md.jinja"
+        if not prompts_dir.is_dir():
+            errors.append(f"{task_dir.name}/prompts: missing directory")
+        elif not task_template.is_file():
+            errors.append(f"{task_dir.name}/prompts/task_template.md.jinja: missing")
+        else:
+            fragments = sorted(
+                path
+                for path in prompts_dir.rglob("*")
+                if path.is_file() and path.name.endswith((".jinja", ".md.jinja"))
+            )
+            if not fragments:
+                errors.append(f"{task_dir.name}/prompts: no prompt fragments found")
+        schemas_dir = task_dir / "schemas"
+        if schemas_dir.exists():
+            schema_files = sorted(path for path in schemas_dir.rglob("*") if path.is_file())
+            if not schema_files:
+                errors.append(f"{task_dir.name}/schemas: directory is empty")
+            unsupported = [
+                path.relative_to(task_dir).as_posix()
+                for path in schema_files
+                if path.suffix not in {".py", ".json", ".yaml", ".yml"}
+            ]
+            if unsupported:
+                errors.append(f"{task_dir.name}/schemas: unsupported files: {unsupported}")
+        artifacts_dir = task_dir / "artifacts"
+        if artifacts_dir.exists():
+            artifacts = [path for path in artifacts_dir.rglob("*") if path.is_file()]
+            if not artifacts:
+                errors.append(f"{task_dir.name}/artifacts: directory is empty")
+        errors.extend(_task_metadata_errors(task_dir))
+    return errors
 
 
 def _collect_files(task_dir: Path) -> list[Path]:
@@ -344,6 +440,7 @@ def consistency_errors() -> list[str]:
     errors: list[str] = []
     errors.extend(wandr_core_deps_errors())
     errors.extend(canonical_source_layout_errors())
+    errors.extend(task_source_quality_errors())
     if (TASK_TEMPLATE_DIR / "solution").exists():
         errors.append("task-template/solution: unexpected reference solution directory")
     canonical_solutions = sorted(
@@ -354,11 +451,7 @@ def consistency_errors() -> list[str]:
         errors.append(f"reference tasks contain solution JSONL files: {canonical_solutions}")
     generated_task_dirs = task_dirs()
     generated_wandr_names = {wandr_task_name(path) for path in generated_task_dirs}
-    reference_names = {
-        path.name
-        for path in REFERENCE_TASKS_DIR.iterdir()
-        if path.is_dir() and (path / "config.py").is_file()
-    }
+    reference_names = {path.name for path in _task_source_dirs()}
     if generated_wandr_names != reference_names:
         errors.append(
             "generated/reference task set mismatch: "

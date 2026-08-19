@@ -648,6 +648,7 @@ class Relay:
     async def _run_endpoint_attempt(self, prompt: str) -> RelayResult:
         delay = self.full_restart_initial_delay_sec
         cumulative_usage = _CumulativeUsage(self.usage_sink)
+        attempt_summaries: list[dict[str, Any]] = []
         for attempt in range(self.max_full_restarts + 1):
             endpoint_result: EndpointResult | None = None
             try:
@@ -686,12 +687,40 @@ class Relay:
                         "Endpoint produced empty required files: "
                         + ", ".join(path.as_posix() for path in empty)
                     )
+                attempt_summaries.append(
+                    {
+                        "attempt": attempt + 1,
+                        "status": "success",
+                        "response_id": endpoint_result.response_id,
+                        "produced_file_count": len(relay_result.files),
+                    }
+                )
+                endpoint_result_with_usage = cumulative_usage.apply(endpoint_result)
+                endpoint_result_with_usage = replace(
+                    endpoint_result_with_usage,
+                    raw={
+                        **(endpoint_result_with_usage.raw or {}),
+                        "relay_attempts": attempt_summaries,
+                        "relay_restart_count": max(0, len(attempt_summaries) - 1),
+                    },
+                )
                 return replace(
                     relay_result,
-                    endpoint_result=cumulative_usage.apply(endpoint_result),
+                    endpoint_result=endpoint_result_with_usage,
                 )
             except Exception as exc:
-                if attempt == self.max_full_restarts:
+                failure_type, retriable, delay_scale = _restart_policy(exc)
+                attempt_summaries.append(
+                    {
+                        "attempt": attempt + 1,
+                        "status": "failed",
+                        "failure_type": failure_type,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "response_id": endpoint_result.response_id if endpoint_result else None,
+                    }
+                )
+                if attempt == self.max_full_restarts or not retriable:
                     raise
                 emit_event(
                     self.observer,
@@ -700,12 +729,14 @@ class Relay:
                     restart=attempt + 1,
                     max_restarts=self.max_full_restarts,
                     delay_sec=delay,
+                    delay_scale=delay_scale,
+                    failure_taxonomy=failure_type,
                     restart_reason=type(exc).__name__,
                     restart_message=str(exc),
                     **_restart_endpoint_metadata(exc, endpoint_result),
                 )
                 await self.sleep(delay)
-                delay = min(delay * 2, self.full_restart_max_delay_sec)
+                delay = min(delay * delay_scale, self.full_restart_max_delay_sec)
         raise RuntimeError("Relay full-run restart loop exhausted without result.")
 
 
@@ -868,6 +899,27 @@ def _restart_endpoint_metadata(
     }
     metadata.update(log_fields(status="full_restart", response_id=response_id))
     return metadata
+
+
+def _restart_policy(exc: BaseException) -> tuple[str, bool, float]:
+    if isinstance(exc, TimeoutError):
+        return ("timeout", True, 1.5)
+    if isinstance(exc, ConnectionError):
+        return ("connection", True, 1.5)
+    if isinstance(exc, asyncio.CancelledError):
+        return ("cancelled", False, 1.0)
+    if isinstance(exc, RelayError):
+        message = str(exc).lower()
+        if "required files" in message or "empty required files" in message:
+            return ("missing_required_files", True, 1.2)
+        if "did not produce any files" in message:
+            return ("no_files_produced", True, 1.2)
+        if "duplicate produced file path" in message:
+            return ("invalid_duplicate_paths", False, 1.0)
+        if "invalid base64" in message:
+            return ("invalid_file_encoding", False, 1.0)
+        return ("relay_error", True, 2.0)
+    return ("unknown_error", True, 2.0)
 
 
 def _relay_result(

@@ -21,6 +21,7 @@ class ArtifactPaths(TypedDict):
     report_txt: Path
     wandr_viewer_html: Path
     wandr_viewer_txt: Path
+    replay_pack_json: Path
     error_json: Path
     setup_log: Path
     uv_bootstrap_log: Path
@@ -41,6 +42,7 @@ def artifact_paths(logs_dir: str | Path) -> ArtifactPaths:
         "report_txt": logs_dir / "report.txt",
         "wandr_viewer_html": artifacts_dir / "wandr_viewer.html",
         "wandr_viewer_txt": artifacts_dir / "wandr_viewer.txt",
+        "replay_pack_json": logs_dir / "replay-pack.json",
         "error_json": logs_dir / "error.json",
         "setup_log": logs_dir / "setup.log",
         "uv_bootstrap_log": logs_dir / "uv-bootstrap.log",
@@ -59,6 +61,7 @@ def _generated_artifacts(artifacts: ArtifactPaths) -> tuple[Path, ...]:
         artifacts["report_txt"],
         artifacts["wandr_viewer_html"],
         artifacts["wandr_viewer_txt"],
+        artifacts["replay_pack_json"],
     )
 
 
@@ -83,6 +86,7 @@ def artifact_refs(
         "report_html": str(artifacts["report_html"]),
         "wandr_viewer_txt": str(artifacts["wandr_viewer_txt"]),
         "wandr_viewer_html": str(artifacts["wandr_viewer_html"]),
+        "replay_pack_json": str(artifacts["replay_pack_json"]),
         "wandr_output_dir": str(output_dir),
         "wandr_debug_dir": str(debug_dir),
         "wandr_eval_log": str(eval_log_path),
